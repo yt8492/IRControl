@@ -10,6 +10,8 @@ import com.google.android.things.pio.Gpio
 import com.google.android.things.pio.GpioCallback
 import com.google.android.things.pio.PeripheralManager
 import kotlinx.android.synthetic.main.activity_main.*
+import java.util.concurrent.TimeUnit
+
 /**
  * Skeleton of an Android Things activity.
  *
@@ -38,25 +40,28 @@ class MainActivity : Activity() {
     val manager = PeripheralManager.getInstance()
     val ledGpio = manager.openGpio(LED)
     val sensorGpio = manager.openGpio(SENSOR)
-    var gpioEdgeList = arrayListOf<Pair<Boolean, Long>>()
-    var gpioEdgeTimeFrom = 0
-    var gpioEdgeTimeTo = 0
+    var gpioEdgeList: MutableList<Pair<Boolean, Long>>? = null
+    val controlList = mutableListOf<MutableList<Pair<Boolean, Long>>>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         button.setOnClickListener {
+            gpioEdgeList = mutableListOf()
             val dialog = AlertDialog.Builder(this)
             dialog.setMessage("記録中")
             dialog.setPositiveButton("終了", DialogInterface.OnClickListener { dialogInterface, i ->
-
+                gpioEdgeList?.let {
+                    controlList.add(it)
+                }
+                gpioEdgeList = null
             })
         }
     }
 
     private val sensorCallback = object : GpioCallback {
         override fun onGpioEdge(gpio: Gpio): Boolean {
-            gpioEdgeList.add(Pair(gpio.value, 1))
+            gpioEdgeList?.add(Pair(gpio.value, System.nanoTime()))
             return true
         }
 

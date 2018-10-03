@@ -7,7 +7,13 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.util.Log
+import android.view.View
+import android.view.ViewParent
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.EditText
+import android.widget.Spinner
 import com.google.android.things.pio.Gpio
 import com.google.android.things.pio.GpioCallback
 import com.google.android.things.pio.PeripheralManager
@@ -49,40 +55,74 @@ class MainActivity : Activity() {
     val ledGpio = manager.openGpio(LED)
     val sensorGpio = manager.openGpio(SENSOR)
     var gpioEdgeList: MutableList<Pair<Boolean, Long>>? = null
-    lateinit var controlList: MutableList<MutableList<Pair<Boolean, Long>>>
+    lateinit var controlList: MutableMap<String, MutableList<Pair<Boolean, Long>>>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        var json = getSharedPreferences(TAG, Context.MODE_PRIVATE)?.getString(CONTROL_LIST, null)
+        ledGpio.setDirection(Gpio.DIRECTION_OUT_INITIALLY_LOW)
+        ledGpio.setActiveType(Gpio.ACTIVE_HIGH)
+        sensorGpio.setEdgeTriggerType(Gpio.EDGE_BOTH)
+        sensorGpio.registerGpioCallback(sensorCallback)
+        val json: String?  = getSharedPreferences(TAG, Context.MODE_PRIVATE)?.getString(CONTROL_LIST, null)
         val gson = GsonBuilder().setPrettyPrinting().create()
-        val listType = object : TypeToken<MutableList<MutableList<Pair<Boolean, Long>>>>() {}.type
-        controlList = gson.fromJson(json, listType)
-        button.setOnClickListener {
+        val listType = object : TypeToken<MutableMap<String, MutableList<Pair<Boolean, Long>>>>() {}.type
+        json?.let {
+            controlList = gson.fromJson(it, listType)
+        } ?: kotlin.run {
+            controlList = mutableMapOf()
+        }
+        button.setOnClickListener { _ ->
             gpioEdgeList = mutableListOf()
             val dialog = AlertDialog.Builder(this)
             dialog.setMessage("記録中")
-            dialog.setPositiveButton("終了", DialogInterface.OnClickListener { dialogInterface, i ->
+            dialog.setPositiveButton("終了") { _, _ ->
                 gpioEdgeList?.let {
-                    controlList.add(it)
+                    controlList.put(editText.text.toString(), it)
                 }
+                setSharedPreference(controlList)
                 gpioEdgeList = null
-            })
+                setSpinnerAdapter()
+            }
+            dialog.show()
         }
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener{
+            override fun onNothingSelected(paremt: AdapterView<*>?) {
+            }
+
+            override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
+                val spinner = parent as Spinner
+                val control = controlList[spinner.selectedItem]
+                control?.let {
+                    for (i in it.indices) {
+                        if (i < it.size - 1) {
+                            ledGpio.value = it[i].first
+                            Log.d(TAG, it[i].first.toString())
+                            TimeUnit.NANOSECONDS.sleep(it[i+1].second - it[i].second)
+                        }
+                    }
+                }
+            }
+
+        }
+        setSpinnerAdapter()
     }
 
-    private val sensorCallback = object : GpioCallback {
-        override fun onGpioEdge(gpio: Gpio): Boolean {
-            gpioEdgeList?.add(Pair(gpio.value, System.nanoTime()))
-            return true
-        }
-
+    private fun setSpinnerAdapter() {
+        val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, controlList.keys.toList())
+        spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinner.adapter = spinnerAdapter
     }
 
-    private fun setSharedPreference(controls: List<Pair<Boolean, Long>>) {
+    private val sensorCallback = GpioCallback { gpio ->
+        gpioEdgeList?.add(Pair(gpio.value, System.nanoTime()))
+        true
+    }
+
+    private fun setSharedPreference(controls: MutableMap<String, MutableList<Pair<Boolean, Long>>>) {
         val sharedPreferences = getSharedPreferences(TAG, Context.MODE_PRIVATE)
         val editor = sharedPreferences.edit()
-        val gson = Gson()
+        val gson = GsonBuilder().setPrettyPrinting().create()
         val json = gson.toJson(controls)
         editor.putString(CONTROL_LIST, json)
         editor.apply()
